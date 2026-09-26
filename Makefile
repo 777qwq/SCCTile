@@ -26,11 +26,17 @@ SCCTile5_FRAMEWORKS = UIKit Foundation
 SCCTile6_FRAMEWORKS = UIKit Foundation
 
 SCCTile1_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit
+SCCTile1_LIBRARIES = sqlite3
 SCCTile2_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit
+SCCTile2_LIBRARIES = sqlite3
 SCCTile3_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit
+SCCTile3_LIBRARIES = sqlite3
 SCCTile4_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit
+SCCTile4_LIBRARIES = sqlite3
 SCCTile5_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit
+SCCTile5_LIBRARIES = sqlite3
 SCCTile6_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit
+SCCTile6_LIBRARIES = sqlite3
 
 SCCTile1_RESOURCE_FILES = Res1/Info.plist
 SCCTile2_RESOURCE_FILES = Res2/Info.plist
