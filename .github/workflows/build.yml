@@ -12,9 +12,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Theos
+      - name: Install Theos (with retry)
         run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" > /dev/null 2>&1
+          for i in 1 2 3; do
+            bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" > /dev/null 2>&1 && break
+            echo "install-theos attempt $i failed, retrying..."
+            rm -rf ~/theos
+            sleep 5
+            [ $i -eq 3 ] && exit 1
+          done
 
       - name: Build package
         run: |
