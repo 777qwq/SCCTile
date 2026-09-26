@@ -15,8 +15,9 @@ jobs:
       - name: Install Theos (with retry)
         run: |
           for i in 1 2 3; do
-            bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" > /dev/null 2>&1 && break
-            echo "install-theos attempt $i failed, retrying..."
+            bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" > install.log 2>&1 && break
+            echo "install-theos attempt $i failed, log tail:"
+            tail -15 install.log
             rm -rf ~/theos
             sleep 5
             [ $i -eq 3 ] && exit 1
