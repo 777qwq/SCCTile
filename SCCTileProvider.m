@@ -40,26 +40,26 @@ static NSString * const kDefaultConfigXML =
 
 @implementation SCCTileProvider
 
-#pragma mark - 生命周期
+#pragma mark - 生命周期（由 Tweak.x constructor 统一调度）
 
-__attribute__((constructor))
-static void SCCTileBundleLoad(void)
++ (void)writeDefaultConfigIfMissing
 {
-    /* 配置不存在时写入带注释的默认模板 */
     if (![[NSFileManager defaultManager] fileExistsAtPath:kPrefPath]) {
         [kDefaultConfigXML writeToFile:kPrefPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     }
+}
 
-    /* 仅 SpringBoard 进程启动配置轮询（Settings 进程也会加载本 bundle） */
-    NSString *processName = [[NSProcessInfo processInfo] processName];
-    if ([processName containsString:@"SpringBoard"]) {
++ (void)startConfigWatch
+{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
         NSTimer *timer = [NSTimer timerWithTimeInterval:5.0
                                                  target:[SCCTileProvider class]
                                                selector:@selector(configChangedCheck:)
                                                userInfo:nil
                                                 repeats:YES];
         [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
-    }
+    });
 }
 
 + (void)configChangedCheck:(NSTimer *)timer

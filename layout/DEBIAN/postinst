@@ -1,0 +1,4 @@
+#!/bin/sh
+# 清理 v1.0.0 的 Provider bundle 残留（v1.0.1 起改为 tweak dylib 注入）
+rm -rf /var/jb/Library/ControlCenter/CCSupport_Providers/SCCTile.bundle
+exit 0
