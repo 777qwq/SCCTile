@@ -1,0 +1,29 @@
+name: Build SCCTile
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" > /dev/null 2>&1
+
+      - name: Build package
+        run: |
+          export THEOS=~/theos
+          make package FINALPACKAGE=1 > build.log 2>&1 || { tail -80 build.log; exit 1; }
+          tail -5 build.log
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: SCCTile-rootless-deb
+          path: packages/*.deb
