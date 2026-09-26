@@ -40,6 +40,37 @@ static NSString * const kDefaultConfigXML =
 
 @implementation SCCTileProvider
 
+#pragma mark - 日志（Filza 直接可读，>512KB 自动截断）
+
++ (void)logFormat:(NSString *)format, ...
+{
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+
+    static NSString * const kLogPath = @"/var/mobile/Library/SCCTile.log";
+    NSString *line = [NSString stringWithFormat:@"[%@][%@] %@\n",
+                      [[NSDate date] descriptionWithLocale:nil],
+                      [[NSProcessInfo processInfo] processName],
+                      message];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:kLogPath error:nil];
+    if ([attrs fileSize] > 512 * 1024) {
+        [fm removeItemAtPath:kLogPath error:nil];
+    }
+
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
+    if (!handle) {
+        [line writeToFile:kLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [handle seekToEndOfFile];
+    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [handle closeFile];
+}
+
 #pragma mark - 生命周期（由 Tweak.x constructor 统一调度）
 
 + (void)writeDefaultConfigIfMissing
@@ -138,9 +169,7 @@ static NSString * const kDefaultConfigXML =
 
     NSError *error = nil;
     [[LSApplicationWorkspace defaultWorkspace] openURL:url withOptions:nil error:&error];
-#ifdef SCCTILE_DEBUG
-    NSLog(@"[SCCTile] run shortcut %@ error=%@", name, error);
-#endif
+    [SCCTileProvider logFormat:@"run shortcut '%@' error=%@", name, error];
 }
 
 #pragma mark - 磁贴配色
@@ -170,7 +199,9 @@ static NSString * const kDefaultConfigXML =
 
 - (NSUInteger)numberOfProvidedModules
 {
-    return [[SCCTileProvider normalizedEntries] count];
+    NSUInteger count = [[SCCTileProvider normalizedEntries] count];
+    [SCCTileProvider logFormat:@"numberOfProvidedModules = %lu", (unsigned long)count];
+    return count;
 }
 
 - (NSString *)identifierForModuleAtIndex:(NSUInteger)index
@@ -180,6 +211,7 @@ static NSString * const kDefaultConfigXML =
 
 - (id)moduleInstanceForModuleIdentifier:(NSString *)identifier
 {
+    [SCCTileProvider logFormat:@"moduleInstanceFor %@", identifier];
     if (![identifier hasPrefix:kModulePrefix]) return nil;
 
     NSString *indexPart = [identifier substringFromIndex:[kModulePrefix length]];

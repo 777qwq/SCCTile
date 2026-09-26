@@ -9,6 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (void)writeDefaultConfigIfMissing;
 + (void)startConfigWatch;
++ (void)logFormat:(NSString *)format, ...;
 + (NSArray<UIColor *> *)palette;
 + (void)runShortcutNamed:(NSString *)name;
 
