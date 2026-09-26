@@ -4,6 +4,10 @@
 
 #import <UIKit/UIKit.h>
 #import <MobileCoreServices/LSApplicationWorkspace.h>
+#import <spawn.h>
+#import <signal.h>
+#import <sys/wait.h>
+#import <crt_externs.h>
 
 /* 基类最小声明（实现在 ControlCenterUIKit.framework，链接触达即可） */
 @interface CCUIToggleModule : NSObject
@@ -15,6 +19,10 @@
 - (UIImage *)selectedIconGlyph;
 - (UIColor *)selectedColor;
 @end
+
+/* SpringCuts (rootless) 提供的后台运行工具：
+ * springcuts -r "指令名" -i  → 全后台执行（走 siriactionsd，不弹快捷指令 App） */
+static NSString * const kSpringCutsTool = @"/var/jb/usr/bin/springcuts";
 
 #pragma mark - 配置读取（各 bundle 私有 static 副本）
 
@@ -46,20 +54,30 @@ static NSDictionary *SCTEntry(NSUInteger slot)
     return nil;
 }
 
+/* 通过 SpringCuts 的 CLI 后台运行指令（siriactionsd 引擎，无 App 启动、无感知） */
+static void SCTSpawnSpringCuts(NSString *name)
+{
+    const char *tool = kSpringCutsTool.UTF8String;
+    const char *argv[] = {tool, "-r", name.UTF8String, "-i", NULL};
+
+    pid_t pid = -1;
+    int rc = posix_spawn(&pid, tool, NULL, NULL, (char *const *)argv, *_NSGetEnviron());
+    if (rc == 0 && pid > 0) {
+        /* 回收子进程避免僵尸（springcuts 瞬时退出） */
+        int status = 0;
+        waitpid(pid, &status, 0);
+    }
+}
+
 static void SCTRunSlot(NSUInteger slot)
 {
     NSDictionary *entry = SCTEntry(slot);
     NSString *name = [entry objectForKey:@"name"];
     if (![name length]) return;
 
-    NSMutableCharacterSet *allowed = [[NSCharacterSet URLQueryAllowedCharacterSet] mutableCopy];
-    [allowed removeCharactersInString:@"?/&=+"];
-    NSString *encoded = [name stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"shortcuts://run-shortcut?name=%@", encoded]];
-    if (!url) return;
-
-    [[LSApplicationWorkspace defaultWorkspace] openURL:url withOptions:nil error:nil];
+    SCTSpawnSpringCuts(name);
 }
+
 
 /* 首次运行写带注释的配置模板（幂等）——定义在使用处之后，供 +load 调用 */
 static void SCTWriteDefaultConfigIfMissing(void)
