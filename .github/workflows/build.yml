@@ -13,6 +13,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Theos (with retry)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for i in 1 2 3; do
             bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)" > install.log 2>&1 && break
