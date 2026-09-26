@@ -29,6 +29,35 @@ static NSString * const kPrefPath = @"/var/mobile/Library/Preferences/com.qwq.sc
 static NSString * const kDBPath = @"/var/mobile/Library/Shortcuts/Shortcuts.sqlite";
 static NSString * const kDefaultSymbol = @"square.stack.3d.up.fill";
 
+#pragma mark - 文件日志（Filza 直接可读，>256KB 自动清）
+
+static void SCTLogFormat(NSString *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+
+    static NSString * const kLogPath = @"/var/mobile/Library/SCCTile.log";
+    NSString *line = [NSString stringWithFormat:@"[%@][%@] %@\n",
+                      [[NSDate date] descriptionWithLocale:nil],
+                      [[NSProcessInfo processInfo] processName],
+                      message];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:kLogPath error:nil];
+    if ([attrs fileSize] > 256 * 1024) [fm removeItemAtPath:kLogPath error:nil];
+
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
+    if (!handle) {
+        [line writeToFile:kLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [handle seekToEndOfFile];
+    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [handle closeFile];
+}
+
 #pragma mark - 配置读取
 
 static NSDictionary *SCTConfig(void)
@@ -67,12 +96,15 @@ static NSDictionary<NSString *, NSDictionary *> *SCTCatalog(void)
     dispatch_once(&sctCatalogOnce, ^{
         NSMutableDictionary<NSString *, NSDictionary *> *catalog = [NSMutableDictionary new];
         sqlite3 *db = NULL;
-        if (sqlite3_open_v2(kDBPath.UTF8String, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        int openRc = sqlite3_open_v2(kDBPath.UTF8String, &db, SQLITE_OPEN_READONLY, NULL);
+        if (openRc != SQLITE_OK) {
+            SCTLogFormat(@"CATALOG db open FAILED rc=%d msg=%s", openRc, db ? sqlite3_errmsg(db) : "no handle");
             if (db) sqlite3_close(db);
             sctCatalog = catalog;
             return;
         }
-        sqlite3_busy_timeout(db, 500);
+        sqlite3_busy_timeout(db, 1000);
+        SCTLogFormat(@"CATALOG db opened");
 
         BOOL hasIconTable = NO;
         BOOL hasIconJoin = NO;
@@ -92,6 +124,8 @@ static NSDictionary<NSString *, NSDictionary *> *SCTCatalog(void)
                 if (st) sqlite3_finalize(st);
             }
         }
+
+        SCTLogFormat(@"CATALOG probe hasIconTable=%d hasIconJoin=%d", hasIconTable, hasIconJoin);
 
         NSString *sql = hasIconJoin
             ? @"SELECT s.ZNAME, s.ZWORKFLOWID, i.ZGLYPHNUMBER, i.ZBACKGROUNDCOLORVALUE "
@@ -116,6 +150,11 @@ static NSDictionary<NSString *, NSDictionary *> *SCTCatalog(void)
         }
         sqlite3_close(db);
         sctCatalog = catalog;
+        SCTLogFormat(@"CATALOG loaded count=%lu", (unsigned long)[catalog count]);
+        for (NSString *k in catalog) {
+            NSDictionary *e = catalog[k];
+            SCTLogFormat(@"CATALOG item \"%@\" uuid=%@ glyph=%@ color=%@", k, e[@"uuid"], e[@"glyph"], e[@"color"]);
+        }
     });
     return sctCatalog;
 }
@@ -136,12 +175,15 @@ static void SCTPrepareRenderers(void)
 
         sctWorkflowIconClass = NSClassFromString(@"WFWorkflowIcon");
         sctWorkflowIconDrawerClass = NSClassFromString(@"WFWorkflowIconDrawer");
+        SCTLogFormat(@"RENDERER wk=%p vsc=%p iconClass=%@ drawerClass=%@",
+                     wk, vsc, sctWorkflowIconClass ? @"YES" : @"NO", sctWorkflowIconDrawerClass ? @"YES" : @"NO");
         if (!sctWorkflowIconClass || !sctWorkflowIconDrawerClass) return;
 
         sctRenderersReady =
             [sctWorkflowIconClass instancesRespondToSelector:NSSelectorFromString(@"initWithBackgroundColorValue:glyphCharacter:customImageData:")] &&
             [sctWorkflowIconDrawerClass instancesRespondToSelector:NSSelectorFromString(@"initWithIcon:")] &&
             [sctWorkflowIconDrawerClass instancesRespondToSelector:NSSelectorFromString(@"imageWithSize:scale:")];
+        SCTLogFormat(@"RENDERER ready=%d", sctRenderersReady);
     });
 }
 
@@ -221,6 +263,7 @@ static UIImage *SCTIconForSlot(NSUInteger slot)
 
     NSNumber *colorValue = entry[@"color"];
     NSNumber *glyph = entry[@"glyph"];
+    SCTLogFormat(@"ICON slot=%lu name=%@ entry=%@ glyph=%@", (unsigned long)slot, name, entry ? @"YES" : @"NO", glyph);
     UIImage *image = nil;
     if (glyph) {
         image = SCTRenderWorkflowIcon(
@@ -228,8 +271,11 @@ static UIImage *SCTIconForSlot(NSUInteger slot)
             (uint16_t)[glyph unsignedIntValue],
             CGSizeMake(30.0, 30.0));
     }
-    if (image) return image;
-
+    if (image) {
+        SCTLogFormat(@"ICON rendered OK (slot=%lu)", (unsigned long)slot);
+        return image;
+    }
+    SCTLogFormat(@"ICON fallback to default symbol (slot=%lu)", (unsigned long)slot);
     return [UIImage systemImageNamed:kDefaultSymbol];
 }
 
@@ -291,10 +337,17 @@ static void SCTPollRunner(id runner, NSUInteger attempt, BOOL observedRunning)
 
 static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
 {
-    if (!workflowIdentifier || !SCTLoadRunnerFrameworks()) return NO;
+    SCTLogFormat(@"RUN begin name=%@ uuid=%@", name, workflowIdentifier);
+    if (!workflowIdentifier || !SCTLoadRunnerFrameworks()) {
+        SCTLogFormat(@"RUN abort: no uuid or frameworks not loaded");
+        return NO;
+    }
 
     NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:workflowIdentifier];
-    if (!uuid) return NO;
+    if (!uuid) {
+        SCTLogFormat(@"RUN abort: uuid parse failed");
+        return NO;
+    }
 
     if (sctActiveRunner) {
         BOOL running = NO;
@@ -305,7 +358,10 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
 
     Class runnerClass = NSClassFromString(@"WFSpringBoardWorkflowRunnerClient");
     SEL initializer = NSSelectorFromString(@"initWithWorkflowIdentifier:");
-    if (!runnerClass || ![runnerClass instancesRespondToSelector:initializer]) return NO;
+    if (!runnerClass || ![runnerClass instancesRespondToSelector:initializer]) {
+        SCTLogFormat(@"RUN abort: runner class/selector unavailable (class=%@)", runnerClass ? @"YES" : @"NO");
+        return NO;
+    }
 
     @try {
         id runner = ((id (*)(id, SEL, NSString *))objc_msgSend)(
@@ -313,6 +369,7 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
         if (!runner) return NO;
         sctActiveRunner = runner;
         ((void (*)(id, SEL))objc_msgSend)(runner, NSSelectorFromString(@"start"));
+        SCTLogFormat(@"RUN started OK name=%@", name);
         SCTPollRunner(runner, 0, NO);
         return YES;
     } @catch (NSException *exception) {
@@ -401,6 +458,7 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
 
     NSUInteger slot = [self sctSlot];
     NSString *name = SCTNameForSlot(slot);
+    SCTLogFormat(@"TAP slot=%lu name=%@", (unsigned long)slot, name);
     if (![name length]) return;
 
     NSDictionary *entry = [SCTCatalog() objectForKey:name];

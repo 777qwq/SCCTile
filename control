@@ -1,6 +1,6 @@
 Package: com.qwq.scctile
 Name: SCCTile
-Version: 1.2.1
+Version: 1.2.2
 Architecture: iphoneos-arm64
 Description: 控制中心快捷指令磁贴（6 槽位静态模块，自动指令图标，系统后台执行引擎，依赖 CCSupport）。注销后在控制中心编辑界面添加，配置文件 /var/mobile/Library/Preferences/com.qwq.scctile.plist
 Depends: com.opa334.ccsupport
