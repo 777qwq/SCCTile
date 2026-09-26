@@ -1,9 +1,11 @@
 #import "SCCTileShortcutModule.h"
 #import "SCCTileProvider.h"
+#import "SCCTileModuleViewController.h"
 
 @implementation SCCTileShortcutModule {
     BOOL _flash;
     BOOL _running;
+    UIViewController<CCUIContentModuleContentViewController> *_contentVC;
 }
 
 - (instancetype)initWithName:(NSString *)name symbol:(NSString *)symbol colorIndex:(NSUInteger)colorIndex
@@ -19,6 +21,7 @@
         _flash = NO;
         _running = NO;
     }
+    [SCCTileProvider logFormat:@"module init '%@' symbol=%@", _shortcutName, _symbolName];
     return self;
 }
 
@@ -39,6 +42,7 @@
 
 - (UIImage *)iconGlyph
 {
+    [SCCTileProvider logFormat:@"iconGlyph asked (%@)", _symbolName];
     return [self glyphImage];
 }
 
@@ -51,6 +55,15 @@
 {
     NSArray<UIColor *> *palette = [SCCTileProvider palette];
     return [palette objectAtIndex:(_colorIndex % [palette count])];
+}
+
+- (UIViewController<CCUIContentModuleContentViewController> *)contentViewController
+{
+    if (!_contentVC) {
+        [SCCTileProvider logFormat:@"contentViewController creating (self-drawn)"];
+        _contentVC = [[SCCTileModuleViewController alloc] initWithModule:self];
+    }
+    return _contentVC;
 }
 
 - (BOOL)isSelected

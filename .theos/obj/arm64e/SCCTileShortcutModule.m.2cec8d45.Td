@@ -93,7 +93,8 @@
   /home/z/theos/vendor/include/ControlCenterUIKit/CCUICAPackageDescription.h \
   /home/z/theos/vendor/include/ControlCenterUIKit/ControlCenterUIKit.h \
   include/CCSModuleProvider.h \
-  /home/z/my-project/scctile/SCCTileProvider.h
+  /home/z/my-project/scctile/SCCTileProvider.h \
+  /home/z/my-project/scctile/SCCTileModuleViewController.h
 
 /home/z/theos/Prefix.pch:
 
@@ -284,3 +285,5 @@ include/SCCTileBase.h:
 include/CCSModuleProvider.h:
 
 /home/z/my-project/scctile/SCCTileProvider.h:
+
+/home/z/my-project/scctile/SCCTileModuleViewController.h:
