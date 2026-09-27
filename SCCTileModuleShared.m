@@ -15,6 +15,7 @@
 #import <objc/runtime.h>
 #import <notify.h>
 #import <CoreSpotlight/CoreSpotlight.h>
+#import <CoreText/CoreText.h>
 
 /* 基类最小声明（实现在 ControlCenterUIKit.framework，链接触达即可） */
 @interface CCUIToggleModule : NSObject
@@ -181,7 +182,82 @@ static void SCTRequestRefresh(void)
     notify_post(kRefreshNotification.UTF8String);
 }
 
-#pragma mark - 图标渲染（WorkflowKit：WFWorkflowIcon + WFWorkflowIconDrawer）
+#pragma mark - 图标渲染
+
+/* --- WorkflowGlyphs 私有字体注册（glyph 编号是私有区码点，没有此字体画出来全是错字形） --- */
+static NSString *SCTWorkflowGlyphFontName(void)
+{
+    static NSString *fontName = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSArray<NSString *> *candidateNames = @[ @"WorkflowGlyphs-Regular", @"Workflow Glyphs" ];
+        for (NSString *candidate in candidateNames) {
+            if ([UIFont fontWithName:candidate size:20.0] != nil) { fontName = candidate; break; }
+        }
+        if (fontName) { SCTLogFormat(@"FONT already registered: %@", fontName); return; }
+
+        NSMutableArray<NSString *> *paths = [NSMutableArray array];
+        NSString *vscPath = [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/VoiceShortcutClient.framework"]
+                             pathForResource:@"WorkflowGlyphs" ofType:@"ttf"];
+        if (vscPath.length) [paths addObject:vscPath];
+        NSString *wkPath = [[NSBundle bundleWithPath:@"/System/Library/PrivateFrameworks/WorkflowKit.framework"]
+                            pathForResource:@"WorkflowGlyphs" ofType:@"ttf"];
+        if (wkPath.length) [paths addObject:wkPath];
+        [paths addObjectsFromArray:@[
+            @"/System/Library/Fonts/WorkflowGlyphs.ttf",
+            @"/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/WorkflowGlyphs.ttf",
+            @"/System/Library/PrivateFrameworks/VoiceShortcutClient.framework/Resources/WorkflowGlyphs.ttf",
+            @"/System/Library/PrivateFrameworks/WorkflowKit.framework/WorkflowGlyphs.ttf",
+            @"/System/Library/PrivateFrameworks/WorkflowKit.framework/Resources/WorkflowGlyphs.ttf",
+        ]];
+
+        for (NSString *path in paths) {
+            if (![[NSFileManager defaultManager] fileExistsAtPath:path]) continue;
+            CFErrorRef regError = NULL;
+            CTFontManagerRegisterFontsForURL((__bridge CFURLRef)[NSURL fileURLWithPath:path],
+                                             kCTFontManagerScopeProcess, &regError);
+            if (regError) { SCTLogFormat(@"FONT register error at %@: %@", path, (__bridge id)regError); CFRelease(regError); }
+            for (NSString *candidate in candidateNames) {
+                if ([UIFont fontWithName:candidate size:20.0] != nil) {
+                    fontName = candidate;
+                    SCTLogFormat(@"FONT registered from %@", path);
+                    return;
+                }
+            }
+        }
+        SCTLogFormat(@"FONT UNAVAILABLE (tried %lu paths)", (unsigned long)[paths count]);
+    });
+    return fontName;
+}
+
+/* 兜底：CoreText 直接画 glyph（模板模式，fillRatio 0.86，与 CSL 一致） */
+static BOOL SCTDrawGlyphRaw(CGContextRef context, CGRect bounds, NSString *fontName, uint32_t glyphNumber, CGFloat fillRatio)
+{
+    if (!context || fontName.length == 0 || glyphNumber == 0 || glyphNumber > UINT16_MAX) return NO;
+    CTFontRef font = CTFontCreateWithName((__bridge CFStringRef)fontName, 100.0, NULL);
+    if (!font) return NO;
+    UniChar character = (UniChar)glyphNumber;
+    CGGlyph glyph = 0;
+    BOOL mapped = CTFontGetGlyphsForCharacters(font, &character, &glyph, 1);
+    CGPathRef glyphPath = (mapped && glyph != 0) ? CTFontCreatePathForGlyph(font, glyph, NULL) : NULL;
+    CFRelease(font);
+    if (!glyphPath || CGPathIsEmpty(glyphPath)) { if (glyphPath) CGPathRelease(glyphPath); return NO; }
+    CGRect pathBounds = CGPathGetBoundingBox(glyphPath);
+    CGFloat maxDim = MAX(CGRectGetWidth(pathBounds), CGRectGetHeight(pathBounds));
+    if (maxDim <= 0.0) { CGPathRelease(glyphPath); return NO; }
+    CGFloat target = MIN(CGRectGetWidth(bounds), CGRectGetHeight(bounds)) * fillRatio;
+    CGFloat scale = target / maxDim;
+    CGContextSaveGState(context);
+    CGContextSetFillColorWithColor(context, [UIColor whiteColor].CGColor);
+    CGContextTranslateCTM(context, CGRectGetMidX(bounds), CGRectGetMidY(bounds));
+    CGContextScaleCTM(context, scale, -scale);
+    CGContextTranslateCTM(context, -CGRectGetMidX(pathBounds), -CGRectGetMidY(pathBounds));
+    CGContextAddPath(context, glyphPath);
+    CGContextFillPath(context);
+    CGContextRestoreGState(context);
+    CGPathRelease(glyphPath);
+    return YES;
+}
 
 static Class sctWorkflowIconClass = Nil;
 static Class sctWorkflowIconDrawerClass = Nil;
@@ -197,6 +273,7 @@ static void SCTPrepareRenderers(void)
 
         sctWorkflowIconClass = NSClassFromString(@"WFWorkflowIcon");
         sctWorkflowIconDrawerClass = NSClassFromString(@"WFWorkflowIconDrawer");
+        SCTWorkflowGlyphFontName(); /* 必须先注册字体，drawer 才能画对 glyph */
         SCTLogFormat(@"RENDERER wk=%p vsc=%p iconClass=%@ drawerClass=%@",
                      wk, vsc, sctWorkflowIconClass ? @"YES" : @"NO", sctWorkflowIconDrawerClass ? @"YES" : @"NO");
         if (!sctWorkflowIconClass || !sctWorkflowIconDrawerClass) return;
@@ -267,7 +344,22 @@ static UIImage *SCTRenderWorkflowIcon(NSNumber *colorValue, uint16_t glyphNumber
         if (!rendered) return nil;
 
         UIImage *image = SCTImageFromRendered(rendered, scale);
-        if (![image isKindOfClass:[UIImage class]] || image.size.width <= 0) return nil;
+        if (![image isKindOfClass:[UIImage class]] || image.size.width <= 0) image = nil;
+
+        /* Apple 渲染失败 → 手绘模板兜底（CSL 同款） */
+        if (!image) {
+            NSString *fontName = SCTWorkflowGlyphFontName();
+            if (fontName.length > 0) {
+                UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+                BOOL drawn = SCTDrawGlyphRaw(UIGraphicsGetCurrentContext(),
+                                             CGRectMake(0, 0, size.width, size.height),
+                                             fontName, glyphNumber, 0.86);
+                UIImage *raw = drawn ? UIGraphicsGetImageFromCurrentImageContext() : nil;
+                UIGraphicsEndImageContext();
+                if (raw) image = [raw imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+            }
+        }
+        if (!image) return nil;
         return [image imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
     } @catch (NSException *exception) {
         NSLog(@"[SCCTile] ICON_RENDER_EXCEPTION glyph=%u reason=%@", glyphNumber, exception.reason);

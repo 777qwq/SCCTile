@@ -18,12 +18,12 @@ SCCTile4_CFLAGS = -fobjc-arc -DSLOT=4
 SCCTile5_CFLAGS = -fobjc-arc -DSLOT=5
 SCCTile6_CFLAGS = -fobjc-arc -DSLOT=6
 
-SCCTile1_FRAMEWORKS = UIKit Foundation
-SCCTile2_FRAMEWORKS = UIKit Foundation
-SCCTile3_FRAMEWORKS = UIKit Foundation
-SCCTile4_FRAMEWORKS = UIKit Foundation
-SCCTile5_FRAMEWORKS = UIKit Foundation
-SCCTile6_FRAMEWORKS = UIKit Foundation
+SCCTile1_FRAMEWORKS = UIKit Foundation CoreText
+SCCTile2_FRAMEWORKS = UIKit Foundation CoreText
+SCCTile3_FRAMEWORKS = UIKit Foundation CoreText
+SCCTile4_FRAMEWORKS = UIKit Foundation CoreText
+SCCTile5_FRAMEWORKS = UIKit Foundation CoreText
+SCCTile6_FRAMEWORKS = UIKit Foundation CoreText
 
 SCCTile1_PRIVATE_FRAMEWORKS = MobileCoreServices ControlCenterUIKit CoreSpotlight
 SCCTile1_LIBRARIES =
