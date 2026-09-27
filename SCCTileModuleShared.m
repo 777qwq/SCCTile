@@ -14,6 +14,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <notify.h>
+#import <CoreSpotlight/CoreSpotlight.h>
 
 /* 基类最小声明（实现在 ControlCenterUIKit.framework，链接触达即可） */
 @interface CCUIToggleModule : NSObject
@@ -85,6 +86,67 @@ static NSString *SCTNameForSlot(NSUInteger slot)
         if ([name length] > 0) return name;
     }
     return nil;
+}
+
+
+/* --- 数据源探针（v1.3.2）：VoiceShortcutCenter 与 Spotlight，找免 daemon 读库的通道 --- */
+static void SCTProbeVoiceShortcutCenter(void)
+{
+    Class cls = NSClassFromString(@"VoiceShortcutCenter");
+    if (!cls) { SCTLogFormat(@"VSC probe: class missing"); return; }
+    SEL sel = NSSelectorFromString(@"getAllVoiceShortcutsWithCompletion:");
+    id target = cls;
+    if (![cls respondsToSelector:sel]) {
+        SEL sh = NSSelectorFromString(@"sharedInstance");
+        if ([cls respondsToSelector:sh]) {
+            target = ((id (*)(id, SEL))objc_msgSend)(cls, sh);
+        } else {
+            SCTLogFormat(@"VSC probe: no selector and no sharedInstance");
+            return;
+        }
+    }
+    if (![target respondsToSelector:sel]) { SCTLogFormat(@"VSC probe: selector missing on target"); return; }
+    SCTLogFormat(@"VSC probe: calling getAllVoiceShortcuts...");
+    void (^block)(NSArray *, NSError *) = ^(NSArray *items, NSError *error) {
+        SCTLogFormat(@"VSC result count=%lu error=%@", (unsigned long)[items count], error);
+        NSUInteger i = 0;
+        for (id item in items) {
+            if (i++ >= 5) break;
+            @try {
+                NSString *desc = [[item description] length] > 400
+                    ? [[[item description] substringToIndex:400] stringByAppendingString:@"..."] : [item description];
+                SCTLogFormat(@"VSC item %@", desc);
+            } @catch (NSException *e) { SCTLogFormat(@"VSC item desc failed %@", e.reason); }
+        }
+    };
+    ((void (*)(id, SEL, id))objc_msgSend)(target, sel, block);
+}
+
+static void SCTProbeSpotlight(void)
+{
+    Class queryClass = NSClassFromString(@"CSSearchQuery");
+    if (!queryClass) { SCTLogFormat(@"SPOTLIGHT probe: class missing"); return; }
+    @try {
+        CSSearchQuery *query = [[queryClass alloc]
+            initWithQueryString:@"_kMDItemDomainIdentifier == \"com.apple.shortcuts\""
+                     attributes:@[ @"_kMDItemIdentifier", @"_kMDItemTitle", @"_kMDItemDisplayName", @"_kMDItemKeywords" ]];
+        NSMutableArray *rows = [NSMutableArray new];
+        query.foundItemsHandler = ^(NSArray<CSSearchableItem *> *items) {
+            [rows addObjectsFromArray:items];
+        };
+        query.completionHandler = ^(NSError *error) {
+            SCTLogFormat(@"SPOTLIGHT done found=%lu error=%@", (unsigned long)[rows count], error);
+            NSUInteger i = 0;
+            for (CSSearchableItem *row in rows) {
+                if (i++ >= 5) break;
+                NSString *desc = [[row description] length] > 400
+                    ? [[[row description] substringToIndex:400] stringByAppendingString:@"..."] : [row description];
+                SCTLogFormat(@"SPOTLIGHT item %@", desc);
+            }
+        };
+        [query start];
+        SCTLogFormat(@"SPOTLIGHT probe started");
+    } @catch (NSException *e) { SCTLogFormat(@"SPOTLIGHT probe exception %@", e.reason); }
 }
 
 #pragma mark - 指令目录（读 sctiled 发布的缓存 plist）
@@ -398,6 +460,8 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
             SCTRequestRefresh();
         }
         SCTCatalog();
+        SCTProbeVoiceShortcutCenter();
+        SCTProbeSpotlight();
     });
 }
 

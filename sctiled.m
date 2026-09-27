@@ -12,6 +12,22 @@
 #import <notify.h>
 #import <dispatch/dispatch.h>
 #import <sys/stat.h>
+#import <errno.h>
+#import <fcntl.h>
+#import <unistd.h>
+#import <Security/Security.h>
+/* SecTask API 为私有符号，SDK 头文件未声明，运行时存在于 Security.framework */
+typedef struct CF_BRIDGED_TYPE(id) SecTaskStruct *SecTaskRef;
+extern SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef allocator);
+extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error);
+#import <errno.h>
+#import <fcntl.h>
+#import <unistd.h>
+#import <Security/Security.h>
+/* SecTask API 为私有符号，SDK 头文件未声明，运行时存在于 Security.framework */
+typedef struct CF_BRIDGED_TYPE(id) SecTaskStruct *SecTaskRef;
+extern SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef allocator);
+extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error);
 
 static NSString * const kDBPath = @"/var/mobile/Library/Shortcuts/Shortcuts.sqlite";
 static NSString * const kCachePath = @"/var/mobile/Library/Preferences/com.qwq.scctile.cache.plist";
@@ -73,6 +89,24 @@ static BOOL TableHasColumn(sqlite3 *db, NSString *table, NSString *column)
 static BOOL RefreshCatalog(void)
 {
     sqlite3 *db = NULL;
+    /* 原始 open errno：区分 unix 权限(EACCES)与沙盒/保护(EPERM 等) */
+    int probeFd = open(kDBPath.fileSystemRepresentation, O_RDONLY);
+    int probeErrno = errno;
+    SCTLog(@"raw open fd=%d errno=%d(%s) uid=%d", probeFd, probeErrno, strerror(probeErrno), (int)getuid());
+    if (probeFd >= 0) close(probeFd);
+
+    SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
+    if (task) {
+        CFTypeRef nsb = SecTaskCopyValueForEntitlement(task, CFSTR("com.apple.private.security.no-sandbox"), NULL);
+        CFTypeRef crq = SecTaskCopyValueForEntitlement(task, CFSTR("com.apple.private.security.container-required"), NULL);
+        SCTLog(@"entitlement view: no-sandbox=%@ container-required=%@", (__bridge id)nsb, (__bridge id)crq);
+        if (nsb) CFRelease(nsb);
+        if (crq) CFRelease(crq);
+        CFRelease(task);
+    } else {
+        SCTLog(@"SecTaskCreateFromSelf failed");
+    }
+
     int rc = sqlite3_open_v2(kDBPath.UTF8String, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL);
     if (rc != SQLITE_OK) {
         const char *msg = db ? sqlite3_errmsg(db) : "no handle";

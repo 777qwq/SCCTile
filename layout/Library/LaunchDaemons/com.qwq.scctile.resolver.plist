@@ -8,8 +8,6 @@
 	<array>
 		<string>/var/jb/usr/libexec/sctiled</string>
 	</array>
-	<key>UserName</key>
-	<string>mobile</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
