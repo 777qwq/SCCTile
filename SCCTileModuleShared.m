@@ -13,6 +13,7 @@
 #import <dlfcn.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <notify.h>
 
 /* 基类最小声明（实现在 ControlCenterUIKit.framework，链接触达即可） */
 @interface CCUIToggleModule : NSObject
@@ -26,7 +27,8 @@
 @end
 
 static NSString * const kPrefPath = @"/var/mobile/Library/Preferences/com.qwq.scctile.plist";
-static NSString * const kDBPath = @"/var/mobile/Library/Shortcuts/Shortcuts.sqlite";
+static NSString * const kCachePath = @"/var/mobile/Library/Preferences/com.qwq.scctile.cache.plist";
+static NSString * const kRefreshNotification = @"com.qwq.scctile/refresh";
 static NSString * const kDefaultSymbol = @"square.stack.3d.up.fill";
 
 #pragma mark - 文件日志（Filza 直接可读，>256KB 自动清）
@@ -85,78 +87,36 @@ static NSString *SCTNameForSlot(NSUInteger slot)
     return nil;
 }
 
-#pragma mark - 指令目录（sqlite3 直读 Shortcuts.sqlite，启动时一次）
+#pragma mark - 指令目录（读 sctiled 发布的缓存 plist）
 
-/* name -> { "uuid": NSString, "glyph": NSNumber(uint16), "color": NSNumber(uint32) } */
+/* 缓存由 sctiled 守护进程维护：name -> { "uuid", "glyph", "color" } */
 static NSDictionary<NSString *, NSDictionary *> *sctCatalog = nil;
 static dispatch_once_t sctCatalogOnce;
 
 static NSDictionary<NSString *, NSDictionary *> *SCTCatalog(void)
 {
     dispatch_once(&sctCatalogOnce, ^{
-        NSMutableDictionary<NSString *, NSDictionary *> *catalog = [NSMutableDictionary new];
-        sqlite3 *db = NULL;
-        int openRc = sqlite3_open_v2(kDBPath.UTF8String, &db, SQLITE_OPEN_READONLY, NULL);
-        if (openRc != SQLITE_OK) {
-            SCTLogFormat(@"CATALOG db open FAILED rc=%d msg=%s", openRc, db ? sqlite3_errmsg(db) : "no handle");
-            if (db) sqlite3_close(db);
+        NSDictionary *cache = [NSDictionary dictionaryWithContentsOfFile:kCachePath];
+        NSDictionary *catalog = cache[@"catalog"];
+        if ([catalog isKindOfClass:[NSDictionary class]]) {
             sctCatalog = catalog;
-            return;
-        }
-        sqlite3_busy_timeout(db, 1000);
-        SCTLogFormat(@"CATALOG db opened");
-
-        BOOL hasIconTable = NO;
-        BOOL hasIconJoin = NO;
-        {
-            sqlite3_stmt *st = NULL;
-            if (sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='ZSHORTCUTICON'", -1, &st, NULL) == SQLITE_OK) {
-                hasIconTable = (sqlite3_step(st) == SQLITE_ROW);
+            SCTLogFormat(@"CATALOG loaded from cache count=%lu updated=%@",
+                         (unsigned long)[catalog count], cache[@"updated"]);
+            for (NSString *k in catalog) {
+                NSDictionary *e = catalog[k];
+                SCTLogFormat(@"CATALOG item \"%@\" uuid=%@ glyph=%@ color=%@", k, e[@"uuid"], e[@"glyph"], e[@"color"]);
             }
-            if (st) sqlite3_finalize(st);
-            if (hasIconTable) {
-                /* ZSHORTCUTICON 旧 schema 可能无这些列 */
-                if (sqlite3_prepare_v2(db, "SELECT ZGLYPHNUMBER, ZBACKGROUNDCOLORVALUE FROM ZSHORTCUTICON LIMIT 0", -1, &st, NULL) == SQLITE_OK) {
-                    hasIconJoin = YES;
-                    sqlite3_finalize(st);
-                    if (sqlite3_prepare_v2(db, "SELECT ZICON FROM ZSHORTCUT LIMIT 0", -1, &st, NULL) != SQLITE_OK) hasIconJoin = NO;
-                }
-                if (st) sqlite3_finalize(st);
-            }
-        }
-
-        SCTLogFormat(@"CATALOG probe hasIconTable=%d hasIconJoin=%d", hasIconTable, hasIconJoin);
-
-        NSString *sql = hasIconJoin
-            ? @"SELECT s.ZNAME, s.ZWORKFLOWID, i.ZGLYPHNUMBER, i.ZBACKGROUNDCOLORVALUE "
-              @"FROM ZSHORTCUT s LEFT JOIN ZSHORTCUTICON i ON s.ZICON = i.Z_PK"
-            : @"SELECT s.ZNAME, s.ZWORKFLOWID, NULL, NULL FROM ZSHORTCUT s";
-
-        sqlite3_stmt *st = NULL;
-        if (sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL) == SQLITE_OK) {
-            while (sqlite3_step(st) == SQLITE_ROW) {
-                const unsigned char *nameText = sqlite3_column_text(st, 0);
-                if (!nameText) continue;
-                NSString *name = [NSString stringWithUTF8String:(const char *)nameText];
-
-                const unsigned char *uuidText = sqlite3_column_text(st, 1);
-                NSMutableDictionary *entry = [NSMutableDictionary new];
-                if (uuidText) entry[@"uuid"] = [NSString stringWithUTF8String:(const char *)uuidText];
-                if (sqlite3_column_type(st, 2) != SQLITE_NULL) entry[@"glyph"] = @(sqlite3_column_int(st, 2));
-                if (sqlite3_column_type(st, 3) != SQLITE_NULL) entry[@"color"] = @(sqlite3_column_int64(st, 3));
-                catalog[name] = entry;
-            }
-            sqlite3_finalize(st);
-        }
-        sqlite3_close(db);
-        sctCatalog = catalog;
-        SCTLogFormat(@"CATALOG loaded count=%lu", (unsigned long)[catalog count]);
-        for (NSString *k in catalog) {
-            NSDictionary *e = catalog[k];
-            SCTLogFormat(@"CATALOG item \"%@\" uuid=%@ glyph=%@ color=%@", k, e[@"uuid"], e[@"glyph"], e[@"color"]);
+        } else {
+            sctCatalog = @{};
+            SCTLogFormat(@"CATALOG cache missing or invalid");
         }
     });
     return sctCatalog;
+}
+
+static void SCTRequestRefresh(void)
+{
+    notify_post(kRefreshNotification.UTF8String);
 }
 
 #pragma mark - 图标渲染（WorkflowKit：WFWorkflowIcon + WFWorkflowIconDrawer）
@@ -339,7 +299,8 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
 {
     SCTLogFormat(@"RUN begin name=%@ uuid=%@", name, workflowIdentifier);
     if (!workflowIdentifier || !SCTLoadRunnerFrameworks()) {
-        SCTLogFormat(@"RUN abort: no uuid or frameworks not loaded");
+        SCTLogFormat(@"RUN abort: no uuid or frameworks not loaded -> request refresh");
+        SCTRequestRefresh();
         return NO;
     }
 
@@ -421,8 +382,12 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
         [xml writeToFile:kPrefPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     }
 
-    /* 预热指令目录（后台线程读库，避免拖慢启动） */
+    /* 预热：读缓存；缓存缺失时请 daemon 刷新 */
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        if (![[NSFileManager defaultManager] fileExistsAtPath:kCachePath]) {
+            SCTLogFormat(@"BOOT cache missing -> request refresh");
+            SCTRequestRefresh();
+        }
         SCTCatalog();
     });
 }

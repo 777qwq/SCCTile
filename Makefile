@@ -52,5 +52,21 @@ SCCTile4_INSTALL_PATH = /Library/ControlCenter/Bundles
 SCCTile5_INSTALL_PATH = /Library/ControlCenter/Bundles
 SCCTile6_INSTALL_PATH = /Library/ControlCenter/Bundles
 
+TOOL_NAME = sctiled
+sctiled_FILES = sctiled.m
+sctiled_CFLAGS = -fobjc-arc
+sctiled_FRAMEWORKS = Foundation CoreFoundation
+sctiled_LIBRARIES = sqlite3
+sctiled_CODESIGN_FLAGS = -Ssctiled.entitlements
+sctiled_INSTALL_PATH = /usr/libexec
+
 include $(THEOS)/makefiles/common.mk
 include $(THEOS_MAKE_PATH)/bundle.mk
+include $(THEOS_MAKE_PATH)/tool.mk
+
+after-stage::
+	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/LaunchDaemons$(ECHO_END)
+	$(ECHO_NOTHING)cp layout/Library/LaunchDaemons/com.qwq.scctile.resolver.plist $(THEOS_STAGING_DIR)/Library/LaunchDaemons/$(ECHO_END)
+	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/DEBIAN$(ECHO_END)
+	$(ECHO_NOTHING)cp DEBIAN/postinst $(THEOS_STAGING_DIR)/DEBIAN/ 2>/dev/null || true$(ECHO_END)
+	$(ECHO_NOTHING)chmod 755 $(THEOS_STAGING_DIR)/DEBIAN/postinst 2>/dev/null || true$(ECHO_END)
