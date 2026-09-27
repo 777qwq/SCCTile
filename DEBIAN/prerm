@@ -1,0 +1,9 @@
+#!/bin/sh
+# SCCTile prerm: stop resolver daemon before upgrade/removal
+LOG=/var/mobile/Library/sctiled.log
+PLIST=/var/jb/Library/LaunchDaemons/com.qwq.scctile.resolver.plist
+echo "[$(date '+%Y-%m-%d %H:%M:%S')][prerm] stopping daemon" >> "$LOG" 2>/dev/null
+L=/var/jb/bin/launchctl
+[ -x "$L" ] || L=launchctl
+"$L" bootout system/com.qwq.scctile.resolver >> "$LOG" 2>&1 || "$L" unload "$PLIST" >> "$LOG" 2>&1 || true
+exit 0

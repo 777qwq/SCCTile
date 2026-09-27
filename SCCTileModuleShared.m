@@ -384,7 +384,16 @@ static BOOL SCTRunNamed(NSString *name, NSString *workflowIdentifier)
 
     /* 预热：读缓存；缓存缺失时请 daemon 刷新 */
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        if (![[NSFileManager defaultManager] fileExistsAtPath:kCachePath]) {
+        BOOL binOk = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/usr/libexec/sctiled"];
+        NSDictionary *state = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.qwq.scctile.plist"];
+        BOOL cacheOk = [[NSFileManager defaultManager] fileExistsAtPath:kCachePath];
+        SCTLogFormat(@"DAEMON diag binary=%@ stateFile=%@ resolverState=%@ resolverMsg=%@ cache=%@",
+                     binOk ? @"YES" : @"NO",
+                     state ? @"YES" : @"NO",
+                     state[@"ResolverState"] ?: @"(nil)",
+                     state[@"ResolverMessage"] ?: @"(nil)",
+                     cacheOk ? @"YES" : @"NO");
+        if (!cacheOk) {
             SCTLogFormat(@"BOOT cache missing -> request refresh");
             SCTRequestRefresh();
         }

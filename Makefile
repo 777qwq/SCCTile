@@ -68,5 +68,4 @@ after-stage::
 	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/Library/LaunchDaemons$(ECHO_END)
 	$(ECHO_NOTHING)cp layout/Library/LaunchDaemons/com.qwq.scctile.resolver.plist $(THEOS_STAGING_DIR)/Library/LaunchDaemons/$(ECHO_END)
 	$(ECHO_NOTHING)mkdir -p $(THEOS_STAGING_DIR)/DEBIAN$(ECHO_END)
-	$(ECHO_NOTHING)cp DEBIAN/postinst $(THEOS_STAGING_DIR)/DEBIAN/ 2>/dev/null || true$(ECHO_END)
-	$(ECHO_NOTHING)chmod 755 $(THEOS_STAGING_DIR)/DEBIAN/postinst 2>/dev/null || true$(ECHO_END)
+	$(ECHO_NOTHING)for f in postinst prerm postrm; do [ -f DEBIAN/$$f ] && cp DEBIAN/$$f $(THEOS_STAGING_DIR)/DEBIAN/ && chmod 755 $(THEOS_STAGING_DIR)/DEBIAN/$$f; done; true$(ECHO_END)

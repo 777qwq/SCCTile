@@ -1,6 +1,29 @@
-#!/bin/bash
-# SCCTile postinst: (re)register resolver daemon (rootless launchd)
-P=/var/jb/bin/launchctl
-$P bootout system/com.qwq.scctile.resolver >/dev/null 2>&1 || true
-$P bootstrap system /var/jb/Library/LaunchDaemons/com.qwq.scctile.resolver.plist >/dev/null 2>&1 || true
+#!/bin/sh
+# SCCTile postinst: register resolver daemon (rootless), with visible log
+LOG=/var/mobile/Library/sctiled.log
+PLIST=/var/jb/Library/LaunchDaemons/com.qwq.scctile.resolver.plist
+BIN=/var/jb/usr/libexec/sctiled
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')][postinst] $1" >> "$LOG" 2>/dev/null; }
+
+log "start bin=$([ -x "$BIN" ] && echo yes || echo NO) plist=$([ -f "$PLIST" ] && echo yes || echo NO)"
+
+L=/var/jb/bin/launchctl
+[ -x "$L" ] || L=launchctl
+log "launchctl=$L"
+
+# stop old instance if any
+"$L" bootout system/com.qwq.scctile.resolver >> "$LOG" 2>&1 || true
+"$L" unload "$PLIST" >> "$LOG" 2>&1 || true
+
+# try modern bootstrap, fall back to legacy load (CSL-proven), then raw exec
+if "$L" bootstrap system "$PLIST" >> "$LOG" 2>&1; then
+    log "bootstrap OK"
+elif "$L" load "$PLIST" >> "$LOG" 2>&1; then
+    log "legacy load OK"
+else
+    log "bootstrap+load FAILED -> raw exec fallback"
+    nohup "$BIN" >> "$LOG" 2>&1 &
+    log "raw exec started pid=$!"
+fi
 exit 0

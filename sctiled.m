@@ -18,6 +18,31 @@ static NSString * const kCachePath = @"/var/mobile/Library/Preferences/com.qwq.s
 static NSString * const kDomain = @"com.qwq.scctile";
 static NSString * const kRefreshNotification = @"com.qwq.scctile/refresh";
 
+static void SCTLog(NSString *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+
+    static NSString * const kLogPath = @"/var/mobile/Library/sctiled.log";
+    NSString *line = [NSString stringWithFormat:@"[%@][sctiled] %@\n",
+                      [[NSDate date] descriptionWithLocale:nil], message];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:kLogPath error:nil];
+    if ([attrs fileSize] > 256 * 1024) [fm removeItemAtPath:kLogPath error:nil];
+
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
+    if (!handle) {
+        [line writeToFile:kLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [handle seekToEndOfFile];
+    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [handle closeFile];
+}
+
 static void PublishState(NSString *state, NSString *message)
 {
     CFPreferencesSetAppValue(CFSTR("ResolverState"), (__bridge CFTypeRef)state, (__bridge CFStringRef)kDomain);
@@ -52,6 +77,7 @@ static BOOL RefreshCatalog(void)
     if (rc != SQLITE_OK) {
         const char *msg = db ? sqlite3_errmsg(db) : "no handle";
         NSLog(@"[sctiled] DB_OPEN_FAILED rc=%d msg=%s", rc, msg);
+        SCTLog(@"DB open FAILED rc=%d msg=%s", rc, msg);
         if (db) sqlite3_close(db);
         PublishState(@"error", [NSString stringWithFormat:@"db open failed rc=%d (%s)", rc, msg]);
         return NO;
@@ -84,6 +110,7 @@ static BOOL RefreshCatalog(void)
     rc = sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL);
     if (rc != SQLITE_OK) {
         NSLog(@"[sctiled] QUERY_PREPARE_FAILED rc=%d msg=%s", rc, sqlite3_errmsg(db));
+        SCTLog(@"query prepare FAILED rc=%d msg=%s", rc, sqlite3_errmsg(db));
         sqlite3_close(db);
         PublishState(@"error", [NSString stringWithFormat:@"query prepare failed rc=%d", rc]);
         return NO;
@@ -114,11 +141,19 @@ static BOOL RefreshCatalog(void)
                                                                error:&err];
     if (!data || ![data writeToFile:kCachePath atomically:YES]) {
         NSLog(@"[sctiled] CACHE_WRITE_FAILED %@", err);
+        SCTLog(@"cache write FAILED %@", err);
         PublishState(@"error", @"cache write failed");
         return NO;
     }
 
     NSLog(@"[sctiled] CATALOG published count=%lu", (unsigned long)[catalog count]);
+    SCTLog(@"refresh done count=%lu", (unsigned long)[catalog count]);
+    NSUInteger i = 0;
+    for (NSString *k in catalog) {
+        if (i++ >= 3) break;
+        NSDictionary *e = catalog[k];
+        SCTLog(@"item \"%@\" uuid=%@ glyph=%@ color=%@", k, e[@"uuid"], e[@"glyph"], e[@"color"]);
+    }
     PublishState(@"ok", [NSString stringWithFormat:@"count=%lu", (unsigned long)[catalog count]]);
     return YES;
 }
@@ -127,6 +162,7 @@ int main(int argc, char **argv, char **envp)
 {
     @autoreleasepool {
         NSLog(@"[sctiled] started pid=%d", (int)getpid());
+        SCTLog(@"daemon started pid=%d uid=%d", (int)getpid(), (int)getuid());
         PublishState(@"starting", @"daemon booted");
 
         /* 启动先读一次 */
@@ -139,6 +175,7 @@ int main(int argc, char **argv, char **envp)
                                  dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
                                  ^(int token) {
                                      NSLog(@"[sctiled] refresh requested");
+                                     SCTLog(@"refresh requested (darwin notify)");
                                      RefreshCatalog();
                                  });
 
